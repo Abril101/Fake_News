@@ -31,3 +31,10 @@ Si quieres correrla local:
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
+```
+
+
+## Modelo entrenado
+El modelo fue subido a Hugging Face y puede encontrarse aquí:  
+[https://huggingface.co/AbyDatateo/FakeNewsClassifier](https://huggingface.co/AbyDatateo/FakeNewsClassifier)
+
