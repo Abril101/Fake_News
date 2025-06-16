@@ -1,67 +1,41 @@
-import torch
-from torch import nn
-from sentence_transformers import SentenceTransformer
-import joblib
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+# utils/inference.py
 
-class BinaryClassifier(nn.Module):
-    def __init__(self, input_dim: int):
-        super().__init__()
-        self.fc = nn.Linear(input_dim * 2, 2)
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 
-    def forward(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
-        x = torch.cat([x1, x2], dim=1)
-        return self.fc(x)
+# ===============================
+# Cargar modelo desde Hugging Face (una sola vez)
+# ===============================
 
-def load_model_1(path="models/classifier.pt"):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    encoder = SentenceTransformer("all-MiniLM-L6-v2").to(device)
-    classifier = BinaryClassifier(encoder.get_sentence_embedding_dimension()).to(device)
-    classifier.load_state_dict(torch.load(path, map_location=device))
-    classifier.eval()
+MODEL_ID = "AbyDatateo/FakeNewsClassifier"
 
-    def predict(text1, text2):
-        with torch.no_grad():
-            emb1 = encoder.encode([text1], convert_to_tensor=True, device=device)
-            emb2 = encoder.encode([text2], convert_to_tensor=True, device=device)
-            output = classifier(emb1, emb2)
-            prob = torch.softmax(output, dim=1)
-            pred = torch.argmax(prob, dim=1).item()
-            return pred, prob[0][pred].item()
-    return predict
+tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_ID)
+classifier = pipeline("text-classification", model=model, tokenizer=tokenizer)
 
-def load_model_2(path="models/tfidf_logistic_model.pt"):
-    model = joblib.load(path)
-    def predict(text1, text2=None):
-        combined_text = text1 if not text2 else text1 + " " + text2
-        probas = model.predict_proba([combined_text])[0]
-        pred = probas.argmax()
-        return pred, probas[pred]
-    return predict
+# ===============================
+# Función de predicción
+# ===============================
 
-def load_model_3(model_dir="models/simple_model"):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer = AutoTokenizer.from_pretrained(model_dir, use_fast=True)
-    model = AutoModelForSequenceClassification.from_pretrained(model_dir).to(device)
-    model.eval()
+def get_predictions(text1, text2=""):
+    """
+    Clasifica el texto como FAKE (0) o REAL (1).
+    Devuelve un diccionario con el nombre del modelo y (label, confianza)
+    """
+    input_text = text1.strip()
+    if text2.strip():
+        input_text += " " + text2.strip()
 
-    def predict(text1, text2=None):
-        input_text = text1 if text2 is None else f"{text1} {text2}"
-        inputs = tokenizer(input_text, return_tensors="pt", truncation=True, padding=True, max_length=512).to(device)
-        with torch.no_grad():
-            outputs = model(**inputs)
-            probs = torch.nn.functional.softmax(outputs.logits, dim=1)
-            pred = torch.argmax(probs, dim=1).item()
-            confidence = probs[0][pred].item()
-            return pred, confidence
-    return predict
+    # Clasificación
+    output = classifier(input_text)[0]
+    label = output["label"]          # 'LABEL_0' o 'LABEL_1'
+    score = output["score"]
 
-def get_predictions(text1, text2):
-    model1 = load_model_1()
-    model2 = load_model_2()
-    model3 = load_model_3()
+    # Convertir a entero 0 o 1
+    if "LABEL_" in label:
+        label_int = int(label.replace("LABEL_", ""))
+    else:
+        label_int = label  # fallback por si el modelo usa nombres personalizados
+
     return {
-        "MiniLM + FFN": model1(text1, text2),
-        "TF-IDF + Logistic": model2(text1, text2),
-        "DistilBERT fine-tuned": model3(text1, text2)
+        "HuggingFaceModel": (label_int, score)
     }
