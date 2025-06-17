@@ -9,7 +9,7 @@ import pickle
 
 # === Modelo 1: TF-IDF + Logistic Regression ===
 # Cargar TF-IDF y modelo logistic desde .pt
-tfidf_vectorizer = torch.load("models/tfidf_vectorizer.pt")
+tfidf_vectorizer = torch.load("models/tfidf_vectorizer.pkl")
 tfidf_model = torch.load("models/tfidf_logistic_model.pt")
 
 # === Modelo 2: Sentence Transformers + Clasificador ===
