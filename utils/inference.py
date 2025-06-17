@@ -1,53 +1,68 @@
-# utils/inference.py
-
 import torch
-import joblib
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
+from torch import nn
 from sentence_transformers import SentenceTransformer
+import joblib
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-# === Modelo 1: TF-IDF + Logistic Regression ===
-tfidf_vectorizer = joblib.load("models/tfidf_vectorizer.pkl")
-tfidf_model = joblib.load("models/tfidf_logistic_model.pkl")
+class BinaryClassifier(nn.Module):
+    def __init__(self, input_dim: int):
+        super().__init__()
+        self.fc = nn.Linear(input_dim * 2, 2)
 
-# === Modelo 2: Sentence Transformers + Clasificador ===
-sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
-sentence_classifier = torch.load("models/classifier.pt")  # entrenado con embeddings
+    def forward(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
+        x = torch.cat([x1, x2], dim=1)
+        return self.fc(x)
 
-# === Modelo 3: Hugging Face fine-tuned BERT ===
-MODEL_ID = "AbyDatateo/FakeNewsClassifier"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_ID)
-classifier = pipeline("text-classification", model=model, tokenizer=tokenizer)
+def load_model_1(path="models/classifier.pt"):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    encoder = SentenceTransformer("all-MiniLM-L6-v2").to(device)
+    classifier = BinaryClassifier(encoder.get_sentence_embedding_dimension()).to(device)
+    classifier.load_state_dict(torch.load(path, map_location=device))
+    classifier.eval()
 
-def get_predictions(text1, text2=""):
-    input_text = (text1.strip() + " " + text2.strip()).strip()
-    results = {}
+    def predict(text1, text2):
+        with torch.no_grad():
+            emb1 = encoder.encode([text1], convert_to_tensor=True, device=device)
+            emb2 = encoder.encode([text2], convert_to_tensor=True, device=device)
+            output = classifier(emb1, emb2)
+            prob = torch.softmax(output, dim=1)
+            pred = torch.argmax(prob, dim=1).item()
+            return pred, prob[0][pred].item()
+    return predict
 
-    # Modelo 1: TF-IDF
-    try:
-        X_tfidf = tfidf_vectorizer.transform([input_text])
-        pred1 = tfidf_model.predict(X_tfidf)[0]
-        score1 = max(tfidf_model.predict_proba(X_tfidf)[0])
-        results["TF-IDF + Logistic Regression"] = (pred1, score1)
-    except Exception as e:
-        results["TF-IDF + Logistic Regression"] = f"❌ Error: {e}"
+def load_model_2(path="models/tfidf_logistic_model.pkl"):
+    model = joblib.load(path)
+    def predict(text1, text2=None):
+        combined_text = text1 if not text2 else text1 + " " + text2
+        probas = model.predict_proba([combined_text])[0]
+        pred = probas.argmax()
+        return pred, probas[pred]
+    return predict
 
-    # Modelo 2: Sentence Transformers (.pt)
-    try:
-        emb = sentence_model.encode([input_text])  # embedding denso
-        pred2 = sentence_classifier.predict(emb)[0]
-        score2 = max(sentence_classifier.predict_proba(emb)[0])
-        results["Sentence Transformers (.pt)"] = (pred2, score2)
-    except Exception as e:
-        results["Sentence Transformers (.pt)"] = f"❌ Error: {e}"
+def load_model_3(model_id="AbyDatateo/FakeNewsClassifier"):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+    model = AutoModelForSequenceClassification.from_pretrained(model_id).to(device)
+    model.eval()
 
-    # Modelo 3: Hugging Face
-    try:
-        hf_result = classifier(input_text)[0]
-        label3 = int(hf_result["label"].split("_")[-1])
-        score3 = hf_result["score"]
-        results["Fine-tuned BERT (HuggingFace)"] = (label3, score3)
-    except Exception as e:
-        results["Fine-tuned BERT (HuggingFace)"] = f"❌ Error: {e}"
+    def predict(text1, text2=None):
+        input_text = text1 if text2 is None else f"{text1} {text2}"
+        inputs = tokenizer(input_text, return_tensors="pt", truncation=True, padding=True, max_length=512).to(device)
+        with torch.no_grad():
+            outputs = model(**inputs)
+            probs = torch.nn.functional.softmax(outputs.logits, dim=1)
+            pred = torch.argmax(probs, dim=1).item()
+            confidence = probs[0][pred].item()
+            return pred, confidence
+    return predict
 
-    return results
+def get_predictions(text1, text2):
+    model1 = load_model_1()
+    model2 = load_model_2()
+    model3 = load_model_3()
+    return {
+        "MiniLM + FFN": model1(text1, text2),
+        "TF-IDF + Logistic": model2(text1, text2),
+        "DistilBERT fine-tuned": model3(text1, text2)
+    }
+
