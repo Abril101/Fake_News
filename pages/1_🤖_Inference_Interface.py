@@ -28,8 +28,13 @@ if st.button("🔍 Predecir"):
         try:
             results = get_predictions(text1, text2)
 
-            for model_name, (label, confidence) in results.items():
-                label_str = "✅ REAL" if label == 1 else "❌ FAKE" if label == 0 else str(label)
-                st.markdown(f"**{model_name}** → **{label_str}** con confianza de `{confidence:.2%}`")
+            for model_name, output in results.items():
+                if isinstance(output, tuple):
+                    label, confidence = output
+                    label_str = "✅ REAL" if label == 1 else "❌ FAKE"
+                    st.markdown(f"**{model_name}** → {label_str} con confianza de `{confidence:.2%}`")
+                else:
+                    st.error(f"{model_name} → {output}")
         except Exception as e:
-            st.error(f"Error al hacer la predicción: {e}")
+            st.error(f"Error inesperado al hacer la predicción: {e}")
+
