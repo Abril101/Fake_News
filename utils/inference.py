@@ -1,33 +1,29 @@
 # utils/inference.py
 
-import torch
+import joblib
 import numpy as np
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 from sentence_transformers import SentenceTransformer
-from sklearn.feature_extraction.text import TfidfVectorizer
-import pickle
 
 # === Modelo 1: TF-IDF + Logistic Regression ===
-# Cargar TF-IDF y modelo logistic desde .pt
-import joblib
 tfidf_vectorizer = joblib.load("models/tfidf_vectorizer.pkl")
-tfidf_model = torch.load("models/tfidf_logistic_model.pt")
+tfidf_model = joblib.load("models/tfidf_logistic_model.pt")  # <- CORRECTO
 
 # === Modelo 2: Sentence Transformers + Clasificador ===
 sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
-sentence_classifier = torch.load("models/classifier.pt")  # Debe ser un modelo tipo sklearn, pero guardado con torch
+sentence_classifier = joblib.load("models/classifier.pt")  # también guardado con joblib
 
-# === Modelo 3: Hugging Face ===
+# === Modelo 3: Fine-tuned BERT en Hugging Face ===
 MODEL_ID = "AbyDatateo/FakeNewsClassifier"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 model = AutoModelForSequenceClassification.from_pretrained(MODEL_ID)
 classifier = pipeline("text-classification", model=model, tokenizer=tokenizer)
 
-# === Función de inferencia unificada ===
+# === Función unificada de predicción ===
 def get_predictions(text1, text2=""):
     input_text = (text1.strip() + " " + text2.strip()).strip()
 
-    # ---- Modelo 1: TF-IDF ----
+    # ---- Modelo 1: TF-IDF + Logistic ----
     X_tfidf = tfidf_vectorizer.transform([input_text])
     pred1 = tfidf_model.predict(X_tfidf)[0]
     score1 = max(tfidf_model.predict_proba(X_tfidf)[0])
@@ -37,7 +33,7 @@ def get_predictions(text1, text2=""):
     pred2 = sentence_classifier.predict(emb)[0]
     score2 = max(sentence_classifier.predict_proba(emb)[0])
 
-    # ---- Modelo 3: Hugging Face ----
+    # ---- Modelo 3: Hugging Face (BERT) ----
     hf_result = classifier(input_text)[0]
     label3 = int(hf_result["label"].replace("LABEL_", ""))
     score3 = hf_result["score"]
